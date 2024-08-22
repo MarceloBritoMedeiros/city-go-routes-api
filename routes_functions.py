@@ -2,6 +2,11 @@ import requests
 from datetime import datetime
 import pandas as pd
 import json
+import firebase_admin
+from firebase_admin import credentials, firestore
+from google.cloud.firestore_v1 import FieldFilter
+cred = credentials.Certificate(r'A:\Projects\TCC\keys\city-go-419101-firebase-adminsdk-chy5n-729ff135d8.json')
+firebase_admin.initialize_app(cred)
 
 def extrair_lat(texto):
     return texto["lat"]
@@ -42,16 +47,29 @@ def geolocation(lat, lng):
 
 def converte(paulista):
     paulista_dict = {}
+    
     for i in paulista:
         paulista_dict[i["name"]] = i["data"]
+        
     return pd.DataFrame(paulista_dict)
 
 def calcula_lotacao2(x, name, typ, dados_metro_pd, dados3_pd):    
-    # print(name)
     if typ == "BUS":
-        df = dados3_pd[dados3_pd["name"]==name]
-        if df.empty==False:
-            lotacao = df["populartimes"]
+        print(name)
+        docs = dados3_pd.where(filter=FieldFilter("name", "==", name)).stream()
+        lista = []
+        for doc in docs:
+            lista.append(doc.to_dict())
+            
+        try:
+            df = lista[0]["populartimes"]
+            lotacao = df
+        except Exception as e:
+            print(e)
+        
+        # df = dados3_pd[dados3_pd["name"]==name]
+        # if df.empty==False:
+        #     lotacao = df["populartimes"]
     else:
         dc = 1000
         cont = 0
@@ -69,13 +87,33 @@ def calcula_lotacao2(x, name, typ, dados_metro_pd, dados3_pd):
             for lat in [lat1, lat2, lat3]:        
                 for lng in [lng1, lng2, lng3]:
                     if cont == 0:
-                        #print(f"{lat}, {lng}")
-                        df = dados_metro_pd[(dados_metro_pd["latitude_abr"]==lat)&(dados_metro_pd["longitude_abr"]==lng)]
-                        if df.empty==False:
+                        print(f"{lat}, {lng}")
+                        
+                        docs = dados_metro_pd.where(filter=FieldFilter("latitude_abr", "==", lat))\
+                                            .where(filter=FieldFilter("longitude_abr", "==", lng))\
+                                            .stream()#.to_dict()
+                        lista = []
+                        for doc in docs:
+                            lista.append(doc.to_dict())
+                            
+                        try:
+                            df = lista[0]
                             lotacao = df["populartimes"]
+                            
                             cont = 1
+                        except Exception as e:
+                            print(e)                           
+                        
+                        # df = dados_metro_pd[(dados_metro_pd["latitude_abr"]==lat)&(dados_metro_pd["longitude_abr"]==lng)]
+                        # if df.empty==False:
+                        #     lotacao = df["populartimes"]
+                        #     cont = 1
     try:
-        tabela_lotacoes = converte(next(iter(dict(lotacao).values()))).reset_index()
+        lotacao_list = []
+        for i in lotacao.keys():
+            lotacao_list.append(lotacao[i])
+            print(lotacao_list)
+        tabela_lotacoes = converte(lotacao_list)#converte(next(iter(dict(lotacao_list).values()))).reset_index()
         lotacao_agora = tabela_lotacoes[datetime.now().strftime("%A")].to_list()
     except:
         pass

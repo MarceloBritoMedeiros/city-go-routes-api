@@ -4,6 +4,13 @@ from datetime import datetime
 import pandas as pd
 import json as json_f
 from routes_functions import *
+import firebase_admin
+from firebase_admin import credentials, firestore
+from google.cloud.firestore_v1 import FieldFilter
+cred = credentials.Certificate(r'A:\Projects\TCC\keys\city-go-419101-firebase-adminsdk-chy5n-729ff135d8.json')
+firebase_admin.initialize_app(cred)
+
+db = firestore.client()
 
 app = Flask(__name__)
 
@@ -19,41 +26,8 @@ def json():
     
     # x = busca_rota_maps("Shopping Cidade São Paulo", "Estrada dos Mirandas 210, Jardim Maria Duarte")
     url = f"https://maps.googleapis.com/maps/api/directions/json?destination={destination}&transit_mode={transit_mode}&origin={origin}&key={key}&mode={mode}&alternatives={alternatives}&language={language}"
-    trajeto = requests.get(url).json()    
-    
-    with open(r"A:\Projects\TCC\bases_finais\nova_base_final.json", 'r', encoding='utf-8') as arquivo:
-        # Carregue o conteúdo do arquivo no dicionário
-        dados = json_f.load(arquivo)
-    
-    dados2 = []
-    dados2_erro = []
-    for i in dados:
-        try:
-            i["populartimes"]
-            dados2.append(i)
-        except:
-            dados2_erro.append(i)
-            
-    dc = 1000
-    dados_metro_pd = pd.read_json("lotacoes_metro.json")
-
-    dados_metro_pd["Latitude"] = dados_metro_pd["coordinates"].apply(extrair_lat)
-    dados_metro_pd["Longitude"] = dados_metro_pd["coordinates"].apply(extrair_lng)
-
-    dados_metro_pd["latitude_abr"] = dados_metro_pd["Latitude"].apply(lambda x: float(int(x*dc))/dc)
-    dados_metro_pd["longitude_abr"] = dados_metro_pd["Longitude"].apply(lambda x: float(int(x*dc))/dc)
-
-    dados2_pd = pd.DataFrame(dados2)
-
-    dados3_pd = dados2_pd.fillna("0")
-    dados3_pd["Latitude"] = dados3_pd["coordinates"].apply(extrair_lat)
-    dados3_pd["Longitude"] = dados3_pd["coordinates"].apply(extrair_lng)
-
-    # dados3_pd["latitude_abr"] = dados3_pd["Latitude"].apply(lambda x: float(int(x*dc))/dc)
-    # dados3_pd["longitude_abr"] = dados3_pd["Longitude"].apply(lambda x: float(int(x*dc))/dc)
-
-    #trajeto = busca_rota_maps("Shopping Cidade São Paulo", "Estrada dos Mirandas 210, Jardim Maria Duarte")
-
+    trajeto = requests.get(url).json()        
+       
     train_steps_list = limpa_trajeto(trajeto)
 
     routes = []
@@ -61,7 +35,7 @@ def json():
         steps = []
         steps2 = []
         for i in j["steps"]:
-            result = calcula_lotacao2(geolocation(i['lat'], i['lng']), i["name"], i["type"], dados_metro_pd, dados3_pd)
+            result = calcula_lotacao2(geolocation(i['lat'], i['lng']), i["name"], i["type"], db.collection('popular-times-metro'), db.collection('popular-times'))
             steps.append(result[0])
             steps2.append(result[1])
         routes.append((steps2, steps, j["duration"]))
