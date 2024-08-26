@@ -2,11 +2,8 @@ import requests
 from datetime import datetime
 import pandas as pd
 import json
-import firebase_admin
 from firebase_admin import credentials, firestore
 from google.cloud.firestore_v1 import FieldFilter
-cred = credentials.Certificate(r'A:\Projects\TCC\keys\city-go-419101-firebase-adminsdk-chy5n-729ff135d8.json')
-firebase_admin.initialize_app(cred)
 
 def extrair_lat(texto):
     return texto["lat"]
@@ -53,9 +50,45 @@ def converte(paulista):
         
     return pd.DataFrame(paulista_dict)
 
-def calcula_lotacao2(x, name, typ, dados_metro_pd, dados3_pd):    
+
+def procura_ponto(y, dados_metro_pd):
+    dc = 1000
+    cont = 0
+    x = geolocation(y[0], y[1])
+    for i in x["results"]:
+        lat1 = float(int(i["geometry"]["location"]["lat"]*dc))/dc
+        lng1 = float(int(i["geometry"]["location"]["lng"]*dc))/dc
+
+        lat2 = float(int(i["geometry"]["viewport"]["northeast"]["lat"]*dc))/dc
+        lng2 = float(int(i["geometry"]["viewport"]["northeast"]["lng"]*dc))/dc
+
+        lat3 = float(int(i["geometry"]["viewport"]["southwest"]["lat"]*dc))/dc
+        lng3 = float(int(i["geometry"]["viewport"]["southwest"]["lng"]*dc))/dc
+
+        for lat in [lat1, lat2, lat3]:        
+            for lng in [lng1, lng2, lng3]:
+                if cont == 0:
+                    docs = dados_metro_pd.where(filter=FieldFilter("latitude_abr", "==", lat))\
+                                        .where(filter=FieldFilter("longitude_abr", "==", lng))\
+                                        .stream()#.to_dict()
+                    lista = []
+                    for doc in docs:
+                        lista.append(doc.to_dict())
+                        
+                    try:
+                        df = lista[0]
+                        lotacao = df["populartimes"]
+                        cont = 1
+                    except Exception as e:
+                        lotacao = []
+                    
+    return lotacao
+
+
+def calcula_lotacao2(y, name, typ, dados_metro_pd, dados3_pd):
+    
     if typ == "BUS":
-        print(name)
+        #print(name)
         docs = dados3_pd.where(filter=FieldFilter("name", "==", name)).stream()
         lista = []
         for doc in docs:
@@ -63,56 +96,18 @@ def calcula_lotacao2(x, name, typ, dados_metro_pd, dados3_pd):
             
         try:
             df = lista[0]["populartimes"]
-            lotacao = df
+            lotacao = df            
         except Exception as e:
-            print(e)
-        
-        # df = dados3_pd[dados3_pd["name"]==name]
-        # if df.empty==False:
-        #     lotacao = df["populartimes"]
+            lotacao = procura_ponto(y, dados3_pd)    
+            
     else:
-        dc = 1000
-        cont = 0
-
-        for i in x["results"]:
-            lat1 = float(int(i["geometry"]["location"]["lat"]*dc))/dc
-            lng1 = float(int(i["geometry"]["location"]["lng"]*dc))/dc
-
-            lat2 = float(int(i["geometry"]["viewport"]["northeast"]["lat"]*dc))/dc
-            lng2 = float(int(i["geometry"]["viewport"]["northeast"]["lng"]*dc))/dc
-
-            lat3 = float(int(i["geometry"]["viewport"]["southwest"]["lat"]*dc))/dc
-            lng3 = float(int(i["geometry"]["viewport"]["southwest"]["lng"]*dc))/dc
-
-            for lat in [lat1, lat2, lat3]:        
-                for lng in [lng1, lng2, lng3]:
-                    if cont == 0:
-                        print(f"{lat}, {lng}")
-                        
-                        docs = dados_metro_pd.where(filter=FieldFilter("latitude_abr", "==", lat))\
-                                            .where(filter=FieldFilter("longitude_abr", "==", lng))\
-                                            .stream()#.to_dict()
-                        lista = []
-                        for doc in docs:
-                            lista.append(doc.to_dict())
-                            
-                        try:
-                            df = lista[0]
-                            lotacao = df["populartimes"]
-                            
-                            cont = 1
-                        except Exception as e:
-                            print(e)                           
-                        
-                        # df = dados_metro_pd[(dados_metro_pd["latitude_abr"]==lat)&(dados_metro_pd["longitude_abr"]==lng)]
-                        # if df.empty==False:
-                        #     lotacao = df["populartimes"]
-                        #     cont = 1
+        lotacao = procura_ponto(y, dados_metro_pd)
+        
     try:
         lotacao_list = []
         for i in lotacao.keys():
             lotacao_list.append(lotacao[i])
-            print(lotacao_list)
+            #print(lotacao_list)
         tabela_lotacoes = converte(lotacao_list)#converte(next(iter(dict(lotacao_list).values()))).reset_index()
         lotacao_agora = tabela_lotacoes[datetime.now().strftime("%A")].to_list()
     except:
@@ -121,6 +116,8 @@ def calcula_lotacao2(x, name, typ, dados_metro_pd, dados3_pd):
         return lotacao_agora, name
     except:
         return [], name
+    
+
     
 def convert_seconds(duration):
     hours = duration // 3600
@@ -144,26 +141,37 @@ def pega_linhas(base):
         rotas.append(linhas)
     return rotas
 
-def retorna_report(valor):
-    sptrans = pd.read_excel(r"A:\Projects\TCC\bases_finais\base_sptrans_full_final.xlsx")
-    metro = pd.read_excel(r"A:\Projects\TCC\bases_finais\log_metro_final.xlsx")   
+def retorna_report(db, valor):
+    
     try:
         if valor[0:5]=="Linha":
-            metro2 = metro[~metro["Status"].isin(["Operação Encerrada", "Operações Encerradas"])]
-            linha = metro2[metro2["Linha"]==valor]
+            docs = db.collection('alertas_metro').where(filter=FieldFilter("Status", "not-in", ["Operação Encerrada", "Operações Encerradas"]))\
+                                        .where(filter=FieldFilter("Linha", "==", valor)).stream()
+            lista = []
+            for doc in docs:
+                lista.append(doc.to_dict())
+                
+            linha = lista[0]
             try:
-                return {"Linha":valor, "Data":linha.iloc[0,8], "Status":linha.iloc[0,5]}
+                return {"Linha":valor, "Data":linha["data"], "Status":linha["Status"]}
             except:
                 return f""
-        else:
-            linha = sptrans[sptrans["Linha"]==valor]
+        else:            
+            docs = db.collection('alertas_sptrans').where(filter=FieldFilter("Linha", "==", valor)).stream()
+            lista = []
+            for doc in docs:
+                lista.append(doc.to_dict())
+                
+            linha = lista[0]
+            #linha = sptrans[sptrans["Linha"]==valor]
             try:
-                return {"Linha":valor, "Descrição":linha.iloc[0,0], "Horário":linha.iloc[0,2], "Ida":linha.iloc[0,5], "Volta":linha.iloc[0,6], "Motivo": linha.iloc[0,7]}
+                return {"Linha":valor, "Descrição":linha['descricao'], "Horário":linha['data_lista'], "Ida":linha['ida'], "Volta":linha['volta'], "Motivo": linha['motivo']}
                 #return f"{valor}\n{linha.iloc[0,0]}\n{linha.iloc[0,2]}\n{linha.iloc[0,5]}\n{linha.iloc[0,6]}\n{linha.iloc[0,7]}" 
             except:
                 return f""
     except:
         return f""
+
     
 def calcula_hora(row):
     row2 = row["index"]+1

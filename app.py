@@ -16,16 +16,16 @@ app = Flask(__name__)
 
 @app.route('/json')
 def json():
-    transit_mode = request.args.get('transit_mode')
-    destination = request.args.get('destination')
-    origin = request.args.get('origin')
-    key = request.args.get('key')
-    mode = request.args.get('mode')
-    alternatives = request.args.get('alternatives')
-    language = request.args.get('language')
+    transit_mode = f"transit_mode={request.args.get('transit_mode')}"
+    destination = f"destination={request.args.get('destination')}"
+    origin = f"origin={request.args.get('origin')}"
+    key = f"key={request.args.get('key')}"
+    mode = f"mode={request.args.get('mode')}"
+    alternatives = f"alternatives={request.args.get('alternatives')}"
+    language = f"language={request.args.get('language')}"
     
     # x = busca_rota_maps("Shopping Cidade São Paulo", "Estrada dos Mirandas 210, Jardim Maria Duarte")
-    url = f"https://maps.googleapis.com/maps/api/directions/json?destination={destination}&transit_mode={transit_mode}&origin={origin}&key={key}&mode={mode}&alternatives={alternatives}&language={language}"
+    url = f"https://maps.googleapis.com/maps/api/directions/json?{destination}&{transit_mode}&{origin}&{key}&{mode}&{alternatives}&{language}"
     trajeto = requests.get(url).json()        
        
     train_steps_list = limpa_trajeto(trajeto)
@@ -35,7 +35,7 @@ def json():
         steps = []
         steps2 = []
         for i in j["steps"]:
-            result = calcula_lotacao2(geolocation(i['lat'], i['lng']), i["name"], i["type"], db.collection('popular-times-metro'), db.collection('popular-times'))
+            result = calcula_lotacao2((i['lat'], i['lng']), i["name"], i["type"], db.collection('popular-times-metro'), db.collection('popular-times'))
             steps.append(result[0])
             steps2.append(result[1])
         routes.append((steps2, steps, j["duration"]))
@@ -49,7 +49,8 @@ def json():
                 o[name] = j[1][c-1]
             else:
                 o[name] = i
-            c+=1
+            c+=1  
+        
         o_pd = pd.DataFrame(o)
         o_pd["media"] = o_pd.mean(axis=1)
         o_pd = o_pd.round(2).reset_index()
@@ -71,7 +72,7 @@ def json():
     for i in base2:
         for k in i:
             if k!="":
-                alertas.append(retorna_report(k))
+                alertas.append(retorna_report(db, k))
         avisos.append(alertas)
 
     rota = pd.DataFrame()
@@ -105,22 +106,26 @@ def json():
     for i in oo:
         oo2.append(i.drop(columns=['Segundos de Viagem', "media", "hora", "Horas de Viagem", "duration_in_seconds", "Horário de chegada"]).to_dict())
 
-    rota_indice = calcula_indice(rota)
-    tempo_indice = calcula_indice(tempo)
-    lotacao_indice = calcula_indice(lotacao)
+    vazio=0
+    try:
+        rota_indice = calcula_indice(rota)
+        tempo_indice = calcula_indice(tempo)
+        lotacao_indice = calcula_indice(lotacao)
+    except:
+        vazio=1
 
     for c, (i, lot, av) in enumerate(zip(trajeto["routes"], oo2, avisos)):
         i["lotacao"] = lot
         i["alertas"] = av
-        if c == rota_indice:
-            i["classifica"] = "melhor_rota"
-        elif c == tempo_indice:
-            i["classifica"] = "melhor_tempo"
-        elif c == lotacao_indice:
-            i["classifica"] = "melhor_lotacao"
-        else:
-            i["classifica"] = "comum"
-        
+        if vazio==0:
+            if c == rota_indice:
+                i["classifica"] = "melhor_rota"
+            elif c == tempo_indice:
+                i["classifica"] = "melhor_tempo"
+            elif c == lotacao_indice:
+                i["classifica"] = "melhor_lotacao"
+            else:
+                i["classifica"] = "comum"
     return trajeto
 
 if __name__ == '__main__':
